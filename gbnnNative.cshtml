@@ -1,0 +1,241 @@
+﻿@using MySql.Data.MySqlClient;
+@using System.Configuration;
+@{
+
+    Layout = null;
+    var title = "GBNN native range map";
+    var message = "";
+    var speciesid = "";
+    var Nrregions = "";
+    var Nrcountries = "";
+    var Nrcontinents = "";
+    var query = "";
+
+    var ctx = HttpContext.Current;
+
+    if (!Request.QueryString["idspecies"].IsEmpty())
+    {
+        speciesid = Request.QueryString["idspecies"];
+    }
+    else if (!String.IsNullOrEmpty(ctx.Request.Url.Segments.Last()))
+    {
+        speciesid = ctx.Request.Url.Segments.Last();
+    }
+    else { message = "No species id found for native range map"; }
+
+    string connStr = ConfigurationManager.ConnectionStrings["strGBnn"].ConnectionString;
+    string cmdStr = "SELECT r.object_id, nr.region_id FROM native_range nr " +
+                           "LEFT JOIN region r ON r.region_id = nr.region_id " +
+                           "WHERE nr.species_id = @speciesid";
+
+    MySqlConnection nrConn = null;
+    MySqlDataReader nrReader = null;
+
+    nrConn = new MySqlConnection(connStr);
+    nrConn.Open();
+    MySqlCommand nrCmd = new MySqlCommand(cmdStr, nrConn);
+    nrCmd.Prepare();
+    nrCmd.Parameters.Add("@speciesid", MySqlDbType.Int32).Value = speciesid;
+    nrReader = nrCmd.ExecuteReader();
+    var i = 0;
+    while (nrReader.Read())
+    {
+        if (i > 0)
+        {
+            if (!nrReader.IsDBNull(0) && !Nrcountries.ToString().IsEmpty()) { Nrcountries += ","; }
+            if (!nrReader.IsDBNull(1) && nrReader.GetInt32(1) != 0 && nrReader.GetInt32(1) < 100 && nrReader.GetInt32(1) > 9 && !Nrregions.IsEmpty()) { Nrregions += ","; }
+            if (!nrReader.IsDBNull(1) && nrReader.GetInt32(1) != 0 && nrReader.GetInt32(1) < 10 && Nrcontinents.IsEmpty()) { Nrcontinents += ","; }
+        }
+        if (!nrReader.IsDBNull(0)) { Nrcountries += nrReader.GetInt32(0); }
+        if (!nrReader.IsDBNull(1) && nrReader.GetInt32(1) != 0 && nrReader.GetInt32(1) < 100 && nrReader.GetInt32(1) > 9) { Nrregions += nrReader.GetInt32(1); }
+        if (!nrReader.IsDBNull(1) && nrReader.GetInt32(1) != 0 && nrReader.GetInt32(1) < 10) { Nrcontinents += nrReader.GetInt32(1); }
+
+        i++;
+    }
+
+    if (!Nrcountries.IsEmpty() && Nrregions.IsEmpty() && !Nrcontinents.IsEmpty())
+    {
+        query = "ID IN (" + Nrcountries + ")";
+    }
+    else if (!Nrregions.IsEmpty() && Nrcountries.IsEmpty())
+    {
+        query = "LEVEL_2_RE IN (" + Nrregions + ")";
+    }
+    else if (!Nrcountries.IsEmpty() && !Nrregions.IsEmpty())
+    {
+        query = "ID IN (" + Nrcountries + ") ";
+        query += "OR LEVEL_2_RE IN (" + Nrregions + ")";
+    }
+    else if (!Nrcontinents.IsEmpty() && !Nrcountries.IsEmpty() && Nrregions.IsEmpty())
+    {
+        query = "LEVEL_1_CO IN (" + Nrcontinents + ")";
+        query += "OR ID IN (" + Nrcountries + ") ";
+    }
+    else if (!Nrcontinents.IsEmpty() && Nrcountries.IsEmpty() && Nrregions.IsEmpty())
+    {
+        query = "LEVEL_1_CO IN (" + Nrcontinents + ")";
+    }
+    else
+    {
+        query = "";
+    }
+
+}
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>@title</title>
+    <link rel="stylesheet" href="https://openlayers.org/en/v4.6.4/css/ol.css" type="text/css">
+    <!-- The line below is only needed for old environments like Internet Explorer and Android 4.x -->
+    <script src="https://cdn.polyfill.io/v2/polyfill.min.js?features=requestAnimationFrame,Element.prototype.classList,URL"></script>
+    <script src="https://openlayers.org/en/v4.6.4/build/ol.js"></script>
+    <script src="https://code.jquery.com/jquery-2.2.3.min.js"></script>
+</head>
+<body>
+    <div id="map" class="map"></div>
+    <div id="info">&nbsp;</div>
+    <script>
+        var serviceUrl = 'http://192.171.199.203/arcgis/rest/services/gbnnNativeRange/MapServer/';
+        var layer = '0';
+        var esrijsonFormat = new ol.format.EsriJSON();
+        var style = new ol.style.Style({
+            fill: new ol.style.Fill({
+                color: 'rgba(225, 225, 225, 0.65)'
+            }),
+            stroke: new ol.style.Stroke({
+                color: 'rgba(255, 0, 0, 0.35)',
+                width: 2
+            })
+        });
+
+        var vRegion = "@query";
+        var vectorSource = new ol.source.Vector({
+            loader: function (extent, resolution, projection) {
+                var url = serviceUrl + layer + '/query/?where=' + vRegion + '&f=json&' +
+                    'returnGeometry=true&spatialRel=esriSpatialRelIntersects&geometry=' +
+                    encodeURIComponent('{"xmin":' + extent[0] + ',"ymin":' +
+                        extent[1] + ',"xmax":' + extent[2] + ',"ymax":' + extent[3] +
+                        ',"spatialReference":{"wkid":102100}}') +
+                    '&geometryType=esriGeometryEnvelope&inSR=102100&outFields=*' +
+                    '&outSR=102100';
+                $.ajax({
+                    url: url, dataType: 'jsonp', success: function (response) {
+                        if (response.error) {
+                            alert(response.error.message + '\n' +
+                                response.error.details.join('\n'));
+                        } else {
+                            // dataProjection will be read from document
+                            var features = esrijsonFormat.readFeatures(response, {
+                                featureProjection: projection,
+                            });
+
+                            //var focus = ol.proj.transform(projection.center());
+                            if (features.length > 0) {
+                                vectorSource.addFeatures(features);
+                            }
+                        }
+                    }
+                });
+            },
+            strategy: ol.loadingstrategy.tile(ol.tilegrid.createXYZ({
+                tileSize: 512
+            }))
+        });
+
+        var view = new ol.View({
+            center: ol.proj.transform([0, 0], 'EPSG:4326', 'EPSG:3857'),
+            zoom: 3,
+            maxZoom: 18,
+            minZoom: 2
+        });
+
+        var vector = new ol.layer.Vector({
+            source: vectorSource,
+            style: function (feature) {
+                var classify = feature.get('activeprod');
+                return style;
+            }
+        });
+
+        var raster = new ol.layer.Tile({
+            source: new ol.source.XYZ({
+                attributions: 'Tiles © <a href="https://services.arcgisonline.com/ArcGIS/' +
+                'rest/services/World_Topo_Map/MapServer">ArcGIS</a>',
+                url: 'https://server.arcgisonline.com/ArcGIS/rest/services/' +
+                'World_Topo_Map/MapServer/tile/{z}/{y}/{x}'
+            })
+        });
+
+
+        if (vRegion) {
+            var map = new ol.Map({
+                layers: [raster, vector],
+                target: document.getElementById('map'),
+                controls: ol.control.defaults().extend([
+                    new ol.control.ScaleLine(),
+                    new ol.control.ZoomSlider()
+                ]),
+                view: view,
+            });
+        }
+        else {
+            var map = new ol.Map({
+                layers: [raster],
+                target: document.getElementById('map'),
+                view: view
+            });
+        }
+        var displayFeatureInfo = function (pixel) {
+            var features = [];
+            map.forEachFeatureAtPixel(pixel, function (feature) {
+                features.push(feature);
+            });
+            if (features.length > 0) {
+                var info = [];
+                var i, ii;
+                for (i = 0, ii = features.length; i < ii; ++i) {
+                    info.push(features[i].get('field_name'));
+                }
+                document.getElementById('info').innerHTML = info.join(', ') || '(unknown)';
+                map.getTarget().style.cursor = 'pointer';
+            } else {
+                document.getElementById('info').innerHTML = '&nbsp;';
+                map.getTarget().style.cursor = '';
+            }
+            //var resultFeatures = xel.features;
+            //Add graphic to the map graphics layer.
+            for (var i = 0, il = features.length; i < il; i++) {
+                var graphic = features[i];
+                graphic.setStyle(style);
+
+            }
+        };
+
+        vectorSource.once('change', function (evt) {
+            if (vectorSource.getState() === 'ready') {
+                // now the source is fully loaded
+                if (vector.getSource().getFeatures().length > 0) {
+                    map.getView().fit(vectorSource.getExtent(), map.getSize());
+
+                    console.info(map.getView().getCenter());
+                    console.info(map.getView().getZoom());
+                }
+            }
+        });
+
+        map.on('pointermove', function (evt) {
+            if (evt.dragging) {
+                return;
+            }
+            var pixel = map.getEventPixel(evt.originalEvent);
+            displayFeatureInfo(pixel);
+        });
+
+        map.on('click', function (evt) {
+            displayFeatureInfo(evt.pixel);
+        });
+
+    </script>
+</body>
+</html>

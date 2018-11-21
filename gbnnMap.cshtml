@@ -1,0 +1,171 @@
+﻿@{
+    Layout = null;
+    var title = "GBNN native range map";
+    var message = "";
+    var speciesid = "";
+    var ctx = HttpContext.Current;
+
+    if (!Request.QueryString["idspecies"].IsEmpty())
+    {
+        speciesid = Request.QueryString["idspecies"];
+    }
+    else if (!String.IsNullOrEmpty(ctx.Request.Url.Segments.Last()))
+    {
+        speciesid = ctx.Request.Url.Segments.Last();
+    }
+    else { message = "No species id found for native range map"; }
+
+}
+
+<!DOCTYPE html>
+
+<html>
+<head>
+    <meta name="viewport" content="width=device-width" />
+    <title>@title</title>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <link rel="stylesheet" href="https://js.arcgis.com/3.22/dijit/themes/tundra/tundra.css">
+    <link rel="stylesheet" href="https://js.arcgis.com/3.22/esri/css/esri.css">
+    <style>
+        html, body, #mapDiv {
+            padding: 0;
+            margin: 0;
+            height: 100%;
+        }
+    </style>
+    <script src="https://js.arcgis.com/3.22/"></script>
+    <script src="http://code.jquery.com/jquery-3.2.1.min.js"></script>
+    <script>
+        var Nrregions = '';
+        var Nrcountries = '';
+        var Nrcontinents = '';
+        var speciesid = parseInt(@speciesid);
+        var uri = 'NativeRange/' + speciesid.toString();
+        var i = 0;
+
+        if (speciesid > 0) {
+            $.ajax({
+                url: uri,
+                type: "GET",
+                contentType: "application/json; charset=utf-8",
+                dataType: "json",
+                success: function (data, status, xhr) {
+                    $.each(data, function (key, val) {
+                        if (key > 0) {
+                            i++;
+                            if (val.objIds != 0 && Nrcountries.length > 0) Nrcountries += ",";
+                            if (val.regionIds != 0 && val.regionIds < 100 && val.regionIds > 9 && Nrregions.length > 0) Nrregions += ",";
+                            if (val.regionIds != 0 && val.regionIds < 10 && Nrcontinents.length > 0) Nrcontinents += ",";
+                        }
+                        if (val.objIds != 0) Nrcountries += val.objIds.toString();
+                        if (val.regionIds != 0 && val.regionIds < 100 && val.regionIds > 9) Nrregions += val.regionIds.toString();
+                        if (val.regionIds != 0 && val.regionIds < 10) Nrcontinents += val.regionIds.toString();
+                    });
+                }
+            });
+        }
+        var map, query, queryTask, app;
+        require(["esri/map",
+                 "esri/geometry/Extent",
+                 "esri/tasks/query",
+                 "esri/tasks/QueryTask",
+                 "esri/symbols/SimpleFillSymbol",
+                 "esri/symbols/SimpleLineSymbol",
+                 "esri/arcgis/utils",
+                 "esri/graphic",
+                 "esri/request",
+                 "esri/config",
+                 "dojo/_base/array",
+                 "esri/Color",
+                 "dojo/number",
+                 "dojo/dom-style",
+                 "dojo/dom",
+                 "dojo/on",
+                 "dojo/parser",
+                 "dijit/layout/BorderContainer",
+                 "dijit/layout/ContentPane",
+                 "dojo/domReady!"],
+        function (Map, Extent, Query, QueryTask, SimpleFillSymbol, SimpleLineSymbol,
+                  arcgisUtils, Graphic, esriRequest, esriConfig,
+                  arrayUtils,Color, number, domStyle, dom, on, parser) {
+            parser.parse();
+            esriConfig.defaults.io.proxyUrl = "/proxy/";
+
+            map = new Map("mapDiv", {
+                basemap: "streets",
+                center: [-56.049, 38.485],
+                zoom: 3,
+                slider: true
+            });
+
+            dojo.connect(map, "onLoad", initFunctionality);
+
+            var symbol = new SimpleFillSymbol(
+                SimpleFillSymbol.STYLE_SOLID,
+                new SimpleLineSymbol(SimpleLineSymbol.STYLE_SOLID,
+                new Color([255, 255, 255, 0.35]),
+                1),
+                new Color([255, 0, 0, 0.35])
+            );
+
+            function initFunctionality(map) {
+                var queryTask = new QueryTask("http://192.171.199.203/arcgis/rest/services/gbnnNativeRange/MapServer/0");
+                var query = new Query();
+
+                query.returnGeometry = true;
+                query.outSpatialReference = {
+                    "wkid": 102100
+                };
+
+                if (Nrcountries.length > 0 && Nrregions == 0 && Nrcontinents.length > 0) {
+                    query.where = "ID IN (" + Nrcountries + ")";
+                } else if (Nrregions.length > 0 && Nrcountries == 0) {
+                    query.where = "LEVEL_2_RE IN (" + Nrregions + ")";
+                } else if (Nrcountries.length > 0 && Nrregions.length > 0) {
+                    query.where = "ID IN (" + Nrcountries + ") ";
+                    query.where += "OR LEVEL_2_RE IN (" + Nrregions + ")";
+                } else if (Nrcontinents.length > 0 && Nrcountries.length > 0 && Nrregions == 0) {
+                    query.where = "LEVEL_1_CO IN (" + Nrcontinents + ")";
+                    query.where += "OR ID IN (" + Nrcountries + ") ";
+                } else if (Nrcontinents.length > 0 && Nrcountries == 0 && Nrregions == 0) {
+                    query.where = "LEVEL_1_CO IN (" + Nrcontinents + ")";
+                }
+                else {
+                    query.where = "";
+                }
+
+                map.infoWindow.resize(800, 600);
+                //resize the map when the browser resizes
+
+                map.graphics.clear();
+                dojo.connect(queryTask, "onComplete", function (featureSet) {
+
+                    var resultFeatures = featureSet.features;
+                    for (var i = 0, il = resultFeatures.length; i < il; i++) {
+                        var graphic = resultFeatures[i];
+                        graphic.setSymbol(symbol);
+
+                        //Add graphic to the map graphics layer.
+                        map.graphics.add(graphic);
+                    }
+                });
+
+                queryTask.execute(query);
+            }
+
+            function handleError(err) {
+                console.log("Unable to get webmap from ArcGIS.com: ", err);
+            }
+        });
+    </script>
+</head>
+<body class="tundra">
+    <div id="mapDiv" data-dojo-type="dijit/layout/ContentPane"
+         data-dojo-props="region:'center'"></div>
+    <div id="txtMessage">@message</div>
+</body>
+</html>
