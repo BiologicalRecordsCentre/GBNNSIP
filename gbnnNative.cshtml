@@ -33,7 +33,6 @@
     string cmdStr = "SELECT r.object_id, nr.region_id, r.name FROM native_range nr " +
                            "LEFT JOIN region r ON r.region_id = nr.region_id " +
                            "WHERE nr.species_id = @sid";
-
     if (speciesid > 0)
     {
         nrConn = new MySqlConnection(connStr);
@@ -47,13 +46,23 @@
         {
             if (i > 0)
             {
-                if (!nrReader.IsDBNull(0) && !Nrcountries.ToString().IsEmpty()) { Nrcountries += ","; vRegionNm += ", "; }
-                if (!nrReader.IsDBNull(1) && nrReader.GetInt32(1) != 0 && nrReader.GetInt32(1) < 100 && nrReader.GetInt32(1) > 9 && !Nrregions.IsEmpty()) { Nrregions += ","; vRegionNm += ", "; }
-                if (!nrReader.IsDBNull(1) && nrReader.GetInt32(1) != 0 && nrReader.GetInt32(1) < 10 && Nrcontinents.IsEmpty()) { Nrcontinents += ","; vRegionNm += ", "; }
+                if (!Nrcountries.ToString().IsEmpty() && nrReader.HasRows) { Nrcountries += ","; }
+                if (!vRegionNm.ToString().IsEmpty() && nrReader.HasRows) { vRegionNm += ", "; }
             }
-            if (!nrReader.IsDBNull(0)) { Nrcountries += nrReader.GetInt32(0); vRegionNm += nrReader.GetString(2); }
-            if (!nrReader.IsDBNull(1) && nrReader.GetInt32(1) != 0 && nrReader.GetInt32(1) < 100 && nrReader.GetInt32(1) > 9) { Nrregions += nrReader.GetInt32(1); vRegionNm += nrReader.GetString(2); }
-            if (!nrReader.IsDBNull(1) && nrReader.GetInt32(1) != 0 && nrReader.GetInt32(1) < 10) { Nrcontinents += nrReader.GetInt32(1); vRegionNm += nrReader.GetString(2); }
+            if (!nrReader.IsDBNull(0) && nrReader.GetInt32(1) < 1000 && nrReader.GetInt32(1) > 100) {
+                Nrcountries += nrReader.GetInt32(1); vRegionNm += nrReader.GetString(2);
+            }
+            if (!nrReader.IsDBNull(1) && nrReader.GetInt32(1) != 0 && nrReader.GetInt32(1) > 1000) {
+                if (!Nrregions.ToString().IsEmpty()) { Nrregions += ", "; }
+                Nrregions += nrReader.GetInt32(1); vRegionNm += nrReader.GetString(2);
+            }
+            if (!nrReader.IsDBNull(1) && nrReader.GetInt32(1) != 0 && nrReader.GetInt32(1) < 100 && nrReader.GetInt32(1) > 9) {
+                if (!Nrregions.ToString().IsEmpty()) { Nrregions += ", "; }
+                Nrregions += nrReader.GetInt32(1); vRegionNm += nrReader.GetString(2);
+            }
+            if (!nrReader.IsDBNull(1) && nrReader.GetInt32(1) != 0 && nrReader.GetInt32(1) < 10) {
+                Nrcontinents += nrReader.GetInt32(1); vRegionNm += nrReader.GetString(2);
+            }
 
             i++;
         }
@@ -118,22 +127,26 @@
     <script src="https://js.arcgis.com/4.10/"></script>
     <script>
        require([
-            "esri/Map",
-            "esri/views/MapView",
+           "esri/Map",
+           "esri/views/MapView",
            "esri/layers/FeatureLayer",
-           "esri/widgets/Home"
+           "esri/widgets/Home",
+           "esri/widgets/Print"
        ], function (Map,
            MapView,
            FeatureLayer,
-           Home
+           Home,
+           Print
        ){
 
-         var vRegion = "@qryRegion";
+           //var layerUrl = "http://192.171.199.203:6080/arcgis/rest/services/gbnnNativeRange/MapServer/0";
+           var layerUrl = "http://192.171.199.203:6080/arcgis/rest/services/nativeCountries/MapServer/0";
+           var vRegion = "@qryRegion";
 
            if (vRegion) {
             // Create the FeatureLayer using filter fields
             var nonnativeLayer = new FeatureLayer({
-                url: "http://192.171.199.203/arcgis/rest/services/gbnnNativeRange/MapServer/0",
+                url: layerUrl,
                 definitionExpression: "@qryRegion",
                 opacity: 0.9
                 });
@@ -147,7 +160,7 @@
             var view = new MapView({
                 container: "viewDiv",
                 map: map,
-                zoom: 3,
+                zoom: 2,
                 center: [15, 45] // longitude, latitude
             });
 
@@ -162,7 +175,18 @@
 
             view.ui.add(document.getElementById("infoDiv"), {
                 position: "top-right"
-            });
+               });
+
+               view.when(function () {
+                   var print = new Print({
+                       view: view,
+                       // specify your own print service
+                       printServiceUrl: "http://192.171.199.203:6080/arcgis/rest/services/Utilities/PrintingTools/GPServer/Export%20Web%20Map%20Task"
+                   });
+                   // Add widget to the bottom right corner of the view
+                   view.ui.add(print, "bottom-left");
+               });
+
           }
         });
     </script>
